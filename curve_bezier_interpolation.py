@@ -47,22 +47,20 @@ def getActiveCurveObject():
     else:
         return None
 
-def interpolatePoints(curve_obj, points):
+def interpolatePoints(spline, points):
     '''
     curve object can contains mutiple curves(splines) with different types(poly, bezier, nurbs),
-    only process splines[0].
+    only process bezier, nurbs.
     '''
     if points < 2:
         raise RuntimeError("At least 2 points is needed.")
     verts = []
     edges = []
-    if curve_obj == None or len(curve_obj.data.splines) < 1:
-        raise RuntimeError("Not a Curve Object")
-    if len(curve_obj.data.splines) < 1:
-        raise RuntimeError("Curve Object Not Contains Curve Spline!")
-    spline = curve_obj.data.splines[0]
+    if spline is None:
+        return verts, edges
     if spline.type != 'BEZIER':
-        raise RuntimeError("Not a Bezier Curve!") 
+        #raise RuntimeError("Not a Bezier Curve!") 
+        return verts, edges
 
     segments = len(spline.bezier_points) if spline.use_cyclic_u else len(spline.bezier_points) - 1
     step = 1.0*segments/points if spline.use_cyclic_u else 1.0*segments/(points - 1)
@@ -71,7 +69,6 @@ def interpolatePoints(curve_obj, points):
     if spline.use_cyclic_u:
         edges.append((points - 1, 0))#connect tail to head.
 
-    #TODO:fix.
     for i in range(points):
         progress = step*i
         print(progress)
@@ -122,17 +119,35 @@ class ConvertBezierToPolyLine(bpy.types.Operator):
                                    default = 12,
                                    soft_min = 2,
                                    soft_max = 1000)
+    def _action(self):
+        verts = []
+        edges = []
+        curve_obj = getActiveCurveObject()
+        if curve_obj is None or curve_obj.type != 'CURVE':
+            raise RuntimeError('Not a curve object.')
+        for spline in curve_obj.data.splines:
+            spline_verts, spline_edges = interpolatePoints(spline, self.points)
+            #accumulate vert index.
+            edge_offset = len(verts)
+            for (i, j) in spline_edges:
+                edges.append( ( (i + edge_offset), (j + edge_offset) ) )
+            verts.extend(spline_verts)
+        createPolyLineFromList(curve_obj, verts, edges)
 
     def execute(self, context):
-        curve_obj = getActiveCurveObject()
-        verts, edges = interpolatePoints(curve_obj, self.points)
-        createPolyLineFromList(curve_obj, verts, edges)
+        self._action()
         return{'FINISHED'}
 
+    # def modal(self, context, event):
+    #     result = context.window_manager.invoke_props_dialog(self)
+    #     if result is {'FINISHED'}:
+    #         return self._action()
+    #     else:
+    #         return result
+
     def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self) 
-        #return self.excute(context)
+        #context.window_manager.modal_handler_add(self)
+        return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context) :
         col = self.layout.column()
